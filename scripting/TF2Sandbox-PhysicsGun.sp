@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "3.00"
+#define PLUGIN_VERSION "4.1"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -31,7 +31,7 @@ public Plugin myinfo =
 #define MODEL_PHYSICSLASER	"materials/sprites/physbeam.vmt"
 #define MODEL_HALOINDEX		"materials/sprites/halo01.vmt"
 #define MODEL_PHYSICSGUNVM	"models/weapons/v_superphyscannon.mdl"
-#define MODEL_PHYSICSGUNWM	"models/weapons/w_physics.mdl"
+#define MODEL_PHYSICSGUNWM	"models/weapons/w_physics.mdl" //"models/weapons/w_superphyscannon.mdl" both work
 
 static const int g_iPhysicsGunWeaponIndex = 423;//Choose Saxxy(423) because the player movement won't become a villager
 static const int g_iPhysicsGunQuality = 1;
@@ -47,6 +47,11 @@ int g_iEntityRef		[MAXPLAYERS + 1]; //Grabbing entity ref
 int g_iGrabPointRef		[MAXPLAYERS + 1]; //Entity grabbing point
 int g_iClientVMRef		[MAXPLAYERS + 1]; //Client physics gun viewmodel ref
 float g_fGrabDistance	[MAXPLAYERS + 1]; //Distance between the client eye and entity grabbing point
+
+float g_oldfEntityPos[MAXPLAYERS + 1][3];
+float g_fEntityPos[MAXPLAYERS + 1][3];
+float g_fRotateCD[MAXPLAYERS + 1];
+float g_fPhysgunCD[MAXPLAYERS + 1];
 
 public void OnPluginStart()
 {
@@ -83,6 +88,9 @@ public void OnClientPutInServer(int client)
 	g_fGrabDistance[client] = 99999.9;
 	
 	g_iClientVMRef[client] = INVALID_ENT_REFERENCE;
+	
+	g_fRotateCD[client] = 0.0;
+	g_fPhysgunCD[client] = 0.0;
 }
 
 public void OnEntityCreated(int entity, const char[] classname)
@@ -417,7 +425,6 @@ stock void ClientSettings(int client, int &buttons, int &impulse, float vel[3], 
 
 stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
 {
-	static float oldfEntityPos[3], fEntityPos[3];
 	float fAimpos[3];
 	fAimpos = GetPointAimPosition(GetClientEyePositionEx(client), GetClientEyeAnglesEx(client), g_fGrabDistance[client], client);
 	
@@ -449,8 +456,8 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 				}
 				
 			}
-			oldfEntityPos = fEntityPos;
-			fEntityPos = fAimpos;
+			g_oldfEntityPos[client] = g_fEntityPos[client];
+			g_fEntityPos[client] = fAimpos;
 		}
 		
 		//Debug
@@ -460,8 +467,11 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 		
 		int iEntity = EntRefToEntIndex(g_iEntityRef[client]);
 		//When the player aim the prop
-		if (EntRefToEntIndex(g_iAimingEntityRef[client]) != INVALID_ENT_REFERENCE && iEntity == INVALID_ENT_REFERENCE)
+		if (EntRefToEntIndex(g_iAimingEntityRef[client]) != INVALID_ENT_REFERENCE && iEntity == INVALID_ENT_REFERENCE && g_fPhysgunCD[client] <= 0.0)
 		{
+			//Fix the prop disappear for no reason
+			g_fPhysgunCD[client] = 1.0;
+			
 			//Set the aimming entity to grabbing entity
 			g_iEntityRef[client] = g_iAimingEntityRef[client];
 			iEntity = EntRefToEntIndex(g_iEntityRef[client]);
@@ -483,8 +493,9 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 
 			g_fGrabDistance[client] = GetVectorDistance(GetClientEyePositionEx(client), fAimpos);
 			
-			fEntityPos = fAimpos;
+			g_fEntityPos[client] = fAimpos;
 		}
+		else if (g_fPhysgunCD[client] > 0.0)g_fPhysgunCD[client] -= 0.1;
 		
 		//When the player grabbing prop
 		if (iGrabPos != INVALID_ENT_REFERENCE && iEntity != INVALID_ENT_REFERENCE)
@@ -500,8 +511,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 					//Rotate in 45'
 					if (buttons & IN_DUCK) 
 					{
-						static float iRotateCD = 0.0;
-						if (iRotateCD <= 0.0)
+						if (g_fRotateCD[client] <= 0.0)
 						{
 							//Get the magnitude
 							int mousex = (mouse[0] < 0)? mouse[0]*-1 : mouse[0];
@@ -511,16 +521,16 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 							{
 								(mouse[0] > 0)? (fAngle[1] += 45.0):(fAngle[1] -= 45.0);
 								
-								iRotateCD = 2.0;
+								g_fRotateCD[client] = 2.0;
 							}
 							else if (mousey > mousex && mousey > 1)
 							{
 								(mouse[1] > 0)? (fAngle[0] -= 45.0):(fAngle[0] += 45.0);
 								
-								iRotateCD = 2.0;
+								g_fRotateCD[client] = 2.0;
 							}								
 						}
-						else if (iRotateCD > 0.0)	iRotateCD -= 0.1;
+						else if (g_fRotateCD[client] > 0.0)	g_fRotateCD[client] -= 0.1;
 					}
 					//Normal rotation
 					else
@@ -586,7 +596,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 			if((StrEqual(szClass, "prop_physics") || StrEqual(szClass, "tf_dropped_weapon")))
 			{
 				float vector[3];
-				MakeVectorFromPoints(oldfEntityPos, fEntityPos, vector);
+				MakeVectorFromPoints(g_oldfEntityPos[client], g_fEntityPos[client], vector);
 				if (StrEqual(szClass, "prop_physics"))
 				{
 					ScaleVector(vector, 20.0);
@@ -611,8 +621,8 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 	}
 }
 
-//Normally 2 is okay but 4 is more secure
-#define FRAME_DELAY 4
+//Normally 2 is okay but 3 is more secure
+#define FRAME_DELAY 3
 
 //Credits: Pelipoika
 public void KillGrabPosPost(int entity)
