@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "4.1"
+#define PLUGIN_VERSION "4.2"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -28,36 +28,41 @@ public Plugin myinfo =
 //Physics Gun Settings
 #define WEAPON_SLOT 1
 
-#define MODEL_PHYSICSLASER	"materials/sprites/physbeam.vmt"
-#define MODEL_HALOINDEX		"materials/sprites/halo01.vmt"
-#define MODEL_PHYSICSGUNVM	"models/weapons/v_superphyscannon.mdl"
-#define MODEL_PHYSICSGUNWM	"models/weapons/w_physics.mdl" //"models/weapons/w_superphyscannon.mdl" both work
+#define MODEL_PHYSICSLASER "materials/sprites/physbeam.vmt"
+#define MODEL_HALOINDEX	"materials/sprites/halo01.vmt"
+#define MODEL_PHYSICSGUNVM "models/weapons/v_superphyscannon.mdl"
+#define MODEL_PHYSICSGUNWM "models/weapons/w_physics.mdl" //"models/weapons/w_superphyscannon.mdl" both work
 
 static const int g_iPhysicsGunWeaponIndex = 423;//Choose Saxxy(423) because the player movement won't become a villager
 static const int g_iPhysicsGunQuality = 1;
 static const int g_iPhysicsGunLevel = 99-128;	//Level displays as 99 but negative level ensures this is unique
+
+ConVar g_cvbCanGrabBuild;
 
 int g_iModelIndex;
 int g_iHaloIndex;
 int g_iPhysicsGunVM;
 int g_iPhysicsGunWM;
 
-int g_iAimingEntityRef	[MAXPLAYERS + 1]; //Aimming entity ref
-int g_iEntityRef		[MAXPLAYERS + 1]; //Grabbing entity ref
-int g_iGrabPointRef		[MAXPLAYERS + 1]; //Entity grabbing point
-int g_iClientVMRef		[MAXPLAYERS + 1]; //Client physics gun viewmodel ref
-float g_fGrabDistance	[MAXPLAYERS + 1]; //Distance between the client eye and entity grabbing point
+int g_iAimingEntityRef[MAXPLAYERS + 1]; //Aimming entity ref
+int g_iEntityRef[MAXPLAYERS + 1]; //Grabbing entity ref
+int g_iGrabPointRef[MAXPLAYERS + 1]; //Entity grabbing point
+int g_iClientVMRef[MAXPLAYERS + 1]; //Client physics gun viewmodel ref
+float g_fGrabDistance[MAXPLAYERS + 1]; //Distance between the client eye and entity grabbing point
 
 float g_oldfEntityPos[MAXPLAYERS + 1][3];
 float g_fEntityPos[MAXPLAYERS + 1][3];
+
 float g_fRotateCD[MAXPLAYERS + 1];
 float g_fPhysgunCD[MAXPLAYERS + 1];
 
 public void OnPluginStart()
 {
 	//RegAdminCmd("sm_pg", 			Command_EquipPhysicsGun, ADMFLAG_ROOT, "Equip a Physics Gun");
-	RegAdminCmd("sm_physgun", 		Command_EquipPhysicsGun, 0, "Equip a Physics Gun");
-	RegAdminCmd("sm_physicsgun", 	Command_EquipPhysicsGun, 0, "Equip a Physics Gun");
+	RegAdminCmd("sm_physgun", Command_EquipPhysicsGun, 0, "Equip a Physics Gun");
+	RegAdminCmd("sm_physicsgun", Command_EquipPhysicsGun, 0, "Equip a Physics Gun");
+	
+	g_cvbCanGrabBuild = CreateConVar("sm_tf2sb_physgun_cangrabbuild", "0", "Enable/disable grabbing buildings", 0, true, 0.0, true, 1.0);
 	
 	HookEvent("player_spawn", Event_PlayerSpawn);
 }
@@ -83,8 +88,8 @@ public void OnClientPutInServer(int client)
 	SDKHook(client, SDKHook_WeaponSwitchPost, WeaponSwitchHookPost);
 	
 	g_iAimingEntityRef[client] 	= INVALID_ENT_REFERENCE;
-	g_iEntityRef[client] 		= INVALID_ENT_REFERENCE;
-	g_iGrabPointRef[client] 	= INVALID_ENT_REFERENCE;
+	g_iEntityRef[client] = INVALID_ENT_REFERENCE;
+	g_iGrabPointRef[client] = INVALID_ENT_REFERENCE;
 	g_fGrabDistance[client] = 99999.9;
 	
 	g_iClientVMRef[client] = INVALID_ENT_REFERENCE;
@@ -231,6 +236,19 @@ bool IsPhysicsGun(int entity)
 		&& GetEntProp(entity, Prop_Send, "m_iEntityLevel") == g_iPhysicsGunLevel;
 }
 
+bool IsEntityBuild(int entity)
+{
+	char classname[64];
+	GetEntityClassname(entity, classname, sizeof(classname));
+	
+	if (StrContains(classname, "obj_") != -1)
+	{
+		return true;
+	}
+	
+	return false;
+}
+
 /* Physics gun function */
 float[] GetClientEyePositionEx(int client)
 {
@@ -256,6 +274,11 @@ float[] GetPointAimPosition(float pos[3], float angles[3], float maxtracedistanc
 		if (entity > 0 && Build_ReturnEntityOwner(entity) == client)
 		{
 			g_iAimingEntityRef[client] = EntIndexToEntRef(entity);
+			
+			if (IsEntityBuild(entity) && !g_cvbCanGrabBuild.BoolValue)
+			{
+				g_iAimingEntityRef[client] = INVALID_ENT_REFERENCE;
+			}
 		}
 		else g_iAimingEntityRef[client] = INVALID_ENT_REFERENCE;
 		
@@ -278,6 +301,7 @@ float[] GetPointAimPosition(float pos[3], float angles[3], float maxtracedistanc
 			return endpos;
 		}
 	}
+	
 	CloseHandle(trace);
 	return pos;
 }
@@ -456,14 +480,15 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 				}
 				
 			}
+			
 			g_oldfEntityPos[client] = g_fEntityPos[client];
 			g_fEntityPos[client] = fAimpos;
 		}
 		
 		//Debug
-		//PrintCenterText(client, "%f %f %f  AimEnt: %i GrabPos: %i Ent: %i Distance: %f"
-		//, fAimpos[0], fAimpos[1], fAimpos[2], EntRefToEntIndex(g_iAimingEntityRef[client]), EntRefToEntIndex(g_iGrabPointRef[client]), EntRefToEntIndex(g_iEntityRef[client]), g_fGrabDistance[client]);
-		//PrintCenterText(client, "%i %i", mouse[0], mouse[1]);
+		/*PrintCenterText(client, "%f %f %f  AimEnt: %i GrabPos: %i Ent: %i Distance: %f"
+		, fAimpos[0], fAimpos[1], fAimpos[2], EntRefToEntIndex(g_iAimingEntityRef[client]), EntRefToEntIndex(g_iGrabPointRef[client]), EntRefToEntIndex(g_iEntityRef[client]), g_fGrabDistance[client]);
+		PrintCenterText(client, "%i %i", mouse[0], mouse[1]);*/
 		
 		int iEntity = EntRefToEntIndex(g_iEntityRef[client]);
 		//When the player aim the prop
@@ -495,7 +520,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 			
 			g_fEntityPos[client] = fAimpos;
 		}
-		else if (g_fPhysgunCD[client] > 0.0)g_fPhysgunCD[client] -= 0.1;
+		else if (g_fPhysgunCD[client] > 0.0) g_fPhysgunCD[client] -= 0.1;
 		
 		//When the player grabbing prop
 		if (iGrabPos != INVALID_ENT_REFERENCE && iEntity != INVALID_ENT_REFERENCE)
@@ -605,9 +630,10 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 				{
 					ScaleVector(vector, 30.0);
 				}
+				
 				TeleportEntity(entity, NULL_VECTOR, NULL_VECTOR, vector);
-
 			}
+			
 			g_iEntityRef[client] = INVALID_ENT_REFERENCE;
 		}
 
