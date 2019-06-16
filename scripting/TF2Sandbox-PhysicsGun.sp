@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "4.4"
+#define PLUGIN_VERSION "4.5"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -29,6 +29,7 @@ public Plugin myinfo =
 #define WEAPON_SLOT 1
 
 #define SOUND_MODE "buttons/button15.wav"
+#define SOUND_COPY "weapons/physcannon/physcannon_pickup.wav"
 
 #define MODEL_PHYSICSLASER "materials/sprites/physbeam.vmt"
 #define MODEL_HALOINDEX	"materials/sprites/halo01.vmt"
@@ -62,6 +63,7 @@ float g_oldfEntityPos[MAXPLAYERS + 1][3];
 float g_fEntityPos[MAXPLAYERS + 1][3];
 
 float g_fRotateCD[MAXPLAYERS + 1];
+float g_fCopyCD[MAXPLAYERS + 1];
 
 public void OnPluginStart()
 {
@@ -83,7 +85,7 @@ public void OnMapStart()
 	g_iPhysicsGunWM = PrecacheModel(MODEL_PHYSICSGUNWM);
 
 	PrecacheSound(SOUND_MODE);
-	PrecacheSound("tools/ifm/ifm_denyundo.wav");
+	PrecacheSound(SOUND_COPY);
 
 	for (int client = 1; client <= MaxClients; client++)
 	{
@@ -106,16 +108,16 @@ public void OnClientPutInServer(int client)
 	g_iClientVMRef[client] = INVALID_ENT_REFERENCE;
 	
 	g_fRotateCD[client] = 0.0;
+	g_fCopyCD[client] = 0.0;
 }
 
 public Action SoundHook(int clients[64], int& numClients, char sample[PLATFORM_MAX_PATH], int& entity, int& channel, float& volume, int& level, int& pitch, int& flags, char soundEntry[PLATFORM_MAX_PATH], int& seed)
 {
-	//TODO: Block "tools/ifm/ifm_denyundo.wav" without blocking talking sound
 	for (int i = 1; i <= MaxClients; i++)
 	{
 		if (IsClientInGame(i) && IsPlayerAlive(i) && IsHoldingPhysicsGun(i))
 		{
-			if (GetClientButtons(i) & IN_ATTACK)
+			if (StrEqual(sample, "common/wpn_denyselect.wav"))
 			{
 				return Plugin_Stop;
 			}
@@ -265,7 +267,7 @@ float[] GetPointAimPosition(float pos[3], float angles[3], float maxtracedistanc
 	if(TR_DidHit(trace))
 	{
 		int entity = TR_GetEntityIndex(trace);
-		if (entity > 0 && Build_ReturnEntityOwner(entity) == client)
+		if (entity > MaxClients && (Build_ReturnEntityOwner(entity) == client || CheckCommandAccess(client, "sm_admin", ADMFLAG_GENERIC)))
 		{
 			g_iAimingEntityRef[client] = EntIndexToEntRef(entity);
 			
@@ -484,6 +486,54 @@ int CreateGlow(int client)
 	return -1;
 }
 
+int Duplicator(int iEntity)
+{
+	//Get Value
+	float fOrigin[3], fAngles[3], fSize;
+	char szModel[64], szName[128], szClass[32];
+	int iCollision, iRed, iGreen, iBlue, iAlpha, iSkin;
+	RenderFx EntityRenderFx;
+
+	GetEntityClassname(iEntity, szClass, sizeof(szClass));
+	GetEntPropString(iEntity, Prop_Data, "m_ModelName", szModel, sizeof(szModel));
+	GetEntPropVector(iEntity, Prop_Send, "m_vecOrigin", fOrigin);
+	GetEntPropVector(iEntity, Prop_Data, "m_angRotation", fAngles);
+	iCollision = GetEntProp(iEntity, Prop_Data, "m_CollisionGroup", 4);
+	fSize = GetEntPropFloat(iEntity, Prop_Send, "m_flModelScale");
+	GetEntityRenderColor(iEntity, iRed, iGreen, iBlue, iAlpha);
+	EntityRenderFx = GetEntityRenderFx(iEntity);
+	iSkin = GetEntProp(iEntity, Prop_Send, "m_nSkin");
+	GetEntPropString(iEntity, Prop_Data, "m_iName", szName, sizeof(szName));
+
+	int iNewEntity = CreateEntityByName(szClass);
+	if (iNewEntity > MaxClients && IsValidEntity(iNewEntity))
+	{
+		SetEntProp(iNewEntity, Prop_Send, "m_nSolidType", 6);
+		SetEntProp(iNewEntity, Prop_Data, "m_nSolidType", 6);
+
+		if (!IsModelPrecached(szModel))
+		{
+			PrecacheModel(szModel);
+		}
+
+		DispatchKeyValue(iNewEntity, "model", szModel);
+		TeleportEntity(iNewEntity, fOrigin, fAngles, NULL_VECTOR);
+		DispatchSpawn(iNewEntity);
+		SetEntData(iNewEntity, FindSendPropInfo("CBaseEntity", "m_CollisionGroup"), iCollision, 4, true);
+		SetEntPropFloat(iNewEntity, Prop_Send, "m_flModelScale", fSize);
+		if(iAlpha < 255)	SetEntityRenderMode(iNewEntity, RENDER_TRANSCOLOR);
+		else				SetEntityRenderMode(iNewEntity, RENDER_NORMAL);
+		SetEntityRenderColor(iNewEntity, iRed, iGreen, iBlue, iAlpha);
+		SetEntityRenderFx(iNewEntity, EntityRenderFx);
+		SetEntProp(iNewEntity, Prop_Send, "m_nSkin", iSkin);
+		SetEntPropString(iNewEntity, Prop_Data, "m_iName", szName);
+
+		return iNewEntity;
+	}
+	
+	return -1;
+}
+
 stock void ClientSettings(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
 {
 	int iViewModel = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
@@ -572,7 +622,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 					//Rotate in 45'
 					if (buttons & IN_DUCK) 
 					{
-						if (g_fRotateCD[client] <= 0.0)
+						if (g_fRotateCD[client] <= GetGameTime())
 						{
 							if (g_bPhysGunMode[client])
 							{
@@ -580,39 +630,26 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 								int mousex = (mouse[0] < 0) ? mouse[0]*-1 : mouse[0];
 								int mousey = (mouse[1] < 0) ? mouse[1]*-1 : mouse[1];
 								
-								if (mousex > mousey && mousex > 1)
+								if (mousex > mousey && mousex > 5)
 								{
 									(mouse[0] > 0) ? (fAngle[1] += 45.0) : (fAngle[1] -= 45.0);
 									
-									g_fRotateCD[client] = 2.0;
+									g_fRotateCD[client] = GetGameTime() + 0.5;
 								}
-								else if (mousey > mousex && mousey > 1)
+								else if (mousey > mousex && mousey > 5)
 								{
 									(mouse[1] > 0) ? (fAngle[0] -= 45.0) : (fAngle[0] += 45.0);
 									
-									g_fRotateCD[client] = 2.0;
+									g_fRotateCD[client] = GetGameTime() + 0.5;
 								}
 							}
 							else
 							{
-								if (FloatAbs(float(mouse[1])) > FloatAbs(float(mouse[0]))) 
-								{
-									if(mouse[1] < 0) fAngle[0] -= 45.0; //Up
-									else if(mouse[1] > 0) fAngle[0] += 45.0; //Down
-									
-									AnglesNormalize(fAngle);
-									if(0.0 < fAngle[0] && fAngle[0] < 45.0)				fAngle[0] = 0.0;
-									else if(45.0 < fAngle[0] && fAngle[0] < 90.0)		fAngle[0] = 45.0;
-									else if(90.0 < fAngle[0] && fAngle[0] < 135.0)		fAngle[0] = 90.0;
-									else if(135.0 < fAngle[0] && fAngle[0] < 180.0)		fAngle[0] = 135.0;							
-									else if(180.0 < fAngle[0] && fAngle[0] < 225.0)		fAngle[0] = 180.0;
-									else if(225.0 < fAngle[0] && fAngle[0] < 270.0)		fAngle[0] = 225.0;								
-									else if(0.0 > fAngle[0] && fAngle[0] > -45.0)		fAngle[0] = -45.0;
-									else if(-45.0 > fAngle[0] && fAngle[0] > -90.0)		fAngle[0] = -90.0;
-									
-									g_fRotateCD[client] = 1.0;
-								}						
-								else
+								//Get the magnitude
+								int mousex = (mouse[0] < 0) ? mouse[0]*-1 : mouse[0];
+								int mousey = (mouse[1] < 0) ? mouse[1]*-1 : mouse[1];
+								
+								if (mousex > mousey && mousex > 5)
 								{
 									if(mouse[0] < 0)		fAngle[1] -= 45.0; //left
 									else if(mouse[0] > 0)	fAngle[1] += 45.0; //right
@@ -627,11 +664,27 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 									else if(-90.0 > fAngle[1] && fAngle[1] > -135.0)	fAngle[1] = -135.0;
 									else if(-135.0 > fAngle[1] && fAngle[1] > -180.0)	fAngle[1] = -180.0;		
 
-									g_fRotateCD[client] = 1.0;
+									g_fRotateCD[client] = GetGameTime() + 0.5;
+								}
+								else if (mousey > mousex && mousey > 5)
+								{
+									if(mouse[1] < 0) fAngle[0] -= 45.0; //Up
+									else if(mouse[1] > 0) fAngle[0] += 45.0; //Down
+									
+									AnglesNormalize(fAngle);
+									if(0.0 < fAngle[0] && fAngle[0] < 45.0)				fAngle[0] = 0.0;
+									else if(45.0 < fAngle[0] && fAngle[0] < 90.0)		fAngle[0] = 45.0;
+									else if(90.0 < fAngle[0] && fAngle[0] < 135.0)		fAngle[0] = 90.0;
+									else if(135.0 < fAngle[0] && fAngle[0] < 180.0)		fAngle[0] = 135.0;							
+									else if(180.0 < fAngle[0] && fAngle[0] < 225.0)		fAngle[0] = 180.0;
+									else if(225.0 < fAngle[0] && fAngle[0] < 270.0)		fAngle[0] = 225.0;								
+									else if(0.0 > fAngle[0] && fAngle[0] > -45.0)		fAngle[0] = -45.0;
+									else if(-45.0 > fAngle[0] && fAngle[0] > -90.0)		fAngle[0] = -90.0;
+									
+									g_fRotateCD[client] = GetGameTime() + 0.5;
 								}
 							}							
 						}
-						else if (g_fRotateCD[client] > 0.0) g_fRotateCD[client] -= 0.1;
 					}
 					//Normal rotation
 					else
@@ -692,6 +745,34 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 				if (g_bPhysGunMode[client])
 				{
 					DispatchKeyValueVector(iGrabPoint, "angles", GetAngleYOnly(angles));
+				}
+			}
+			
+			if (impulse == 201)
+			{
+				if(g_fCopyCD[client] <= GetGameTime())
+				{
+					g_fCopyCD[client] = GetGameTime() + 1.0;
+					
+					//Unstick
+					AcceptEntityInput(iEntity, "ClearParent");
+					
+					int iPasteEntity = Duplicator(iEntity);
+					if (IsValidEntity(iPasteEntity))
+					{
+						if (Build_RegisterEntityOwner(iPasteEntity, Build_ReturnEntityOwner(iEntity)))
+						{
+							EmitSoundToAll(SOUND_COPY, client, SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, 0.8);
+						}
+						else
+						{
+							AcceptEntityInput(iPasteEntity, "Kill");
+						}
+					}
+					
+					//Stick
+					SetVariantString("!activator");
+					AcceptEntityInput(iEntity, "SetParent", iGrabPoint);		
 				}
 			}
 		}
@@ -774,8 +855,12 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 			}
 			
 			//Set entity Outline
-			g_iGrabOutlineRef[client] = EntIndexToEntRef(CreateOutline(iEntity));
-
+			int outline = CreateOutline(iEntity);
+			if (IsValidEntity(outline))
+			{
+				g_iGrabOutlineRef[client] = EntIndexToEntRef(outline);
+			}
+			
 			//Set physgun glow
 			int iGrabGlow = EntRefToEntIndex(g_iGrabGlowRef[client]); 
 			if (iGrabGlow == INVALID_ENT_REFERENCE)
@@ -846,8 +931,6 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 	
 	if (IsHoldingPhysicsGun(client))
 	{
-		StopSoundPerm(client, "tools/ifm/ifm_denyundo.wav");
-		
 		if (!(buttons & IN_ATTACK))
 		{
 			if (buttons & IN_ATTACK2)
@@ -904,12 +987,20 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 					char strClassname[64];
 					GetEntityClassname(iEntity, strClassname, sizeof(strClassname));
 					
-					ShowHudText(client, -1, "MODE: %s\n\nObject: %s\nName: %s", strMode, strClassname, GetEntityName(iEntity));
+					int owner = Build_ReturnEntityOwner(iEntity);
+					if (owner > 0 && owner <= MaxClients)
+					{
+						ShowHudText(client, -1, "MODE: %s\n\nObject: %s\nName: %s\nOwner: %N", strMode, strClassname, GetEntityName(iEntity), Build_ReturnEntityOwner(iEntity));
+					}
+					else
+					{
+						ShowHudText(client, -1, "MODE: %s\n\nObject: %s\nName: %s\nOwner: Unknown", strMode, strClassname, GetEntityName(iEntity));
+					}
 				}
 			}
 			else
 			{
-				ShowHudText(client, -1, "MODE: %s\n\n[MOUSE2] Change Mode\n[MOUSE1] Grab\n[MOUSE3] Pull/Push\n[R] Rotate\n[R]+[CTRL] Rotate 45*", strMode);
+				ShowHudText(client, -1, "MODE: %s\n\n[MOUSE2] Change Mode\n[MOUSE1] Grab\n[MOUSE3] Pull/Push\n[R] Rotate\n[R]+[CTRL] Rotate 45*\n[T] Smart Copy", strMode);
 			}
 		}
 	}
@@ -922,18 +1013,6 @@ public void KillGrabPointPost(int iGrabPointRef)
 	{
 		AcceptEntityInput(iGrabPoint, "Kill");
 	}
-}
-
-stock void StopSoundPerm(int client, char[] sound)
-{
-	StopSound(client, SNDCHAN_AUTO, sound);
-	StopSound(client, SNDCHAN_WEAPON, sound);
-	StopSound(client, SNDCHAN_VOICE, sound);
-	StopSound(client, SNDCHAN_ITEM, sound);
-	StopSound(client, SNDCHAN_BODY, sound);
-	StopSound(client, SNDCHAN_STREAM, sound);
-	StopSound(client, SNDCHAN_VOICE_BASE, sound);
-	StopSound(client, SNDCHAN_USER_BASE, sound);
 }
 
 char[] GetEntityName(int entity)
