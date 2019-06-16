@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "4.3"
+#define PLUGIN_VERSION "4.4"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -83,6 +83,7 @@ public void OnMapStart()
 	g_iPhysicsGunWM = PrecacheModel(MODEL_PHYSICSGUNWM);
 
 	PrecacheSound(SOUND_MODE);
+	PrecacheSound("tools/ifm/ifm_denyundo.wav");
 
 	for (int client = 1; client <= MaxClients; client++)
 	{
@@ -95,7 +96,7 @@ public void OnMapStart()
 
 public void OnClientPutInServer(int client)
 {
-	g_iAimingEntityRef[client] 	= INVALID_ENT_REFERENCE;
+	g_iAimingEntityRef[client] = INVALID_ENT_REFERENCE;
 	g_iGrabEntityRef[client] = INVALID_ENT_REFERENCE;
 	g_iGrabGlowRef[client] = INVALID_ENT_REFERENCE;
 	g_iGrabOutlineRef[client] = INVALID_ENT_REFERENCE;
