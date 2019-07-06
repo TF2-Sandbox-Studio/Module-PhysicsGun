@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "4.5"
+#define PLUGIN_VERSION "4.6"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -489,22 +489,27 @@ int CreateGlow(int client)
 int Duplicator(int iEntity)
 {
 	//Get Value
-	float fOrigin[3], fAngles[3], fSize;
+	float fOrigin[3], fAngles[3];
 	char szModel[64], szName[128], szClass[32];
-	int iCollision, iRed, iGreen, iBlue, iAlpha, iSkin;
-	RenderFx EntityRenderFx;
-
+	int iRed, iGreen, iBlue, iAlpha;
+	
 	GetEntityClassname(iEntity, szClass, sizeof(szClass));
+	
+	if (StrEqual(szClass, "prop_dynamic"))
+	{
+		szClass = "prop_dynamic_override";
+	}
+	else if (StrEqual(szClass, "prop_physics"))
+	{
+		szClass = "prop_physics_override";
+	}
+	
 	GetEntPropString(iEntity, Prop_Data, "m_ModelName", szModel, sizeof(szModel));
 	GetEntPropVector(iEntity, Prop_Send, "m_vecOrigin", fOrigin);
 	GetEntPropVector(iEntity, Prop_Data, "m_angRotation", fAngles);
-	iCollision = GetEntProp(iEntity, Prop_Data, "m_CollisionGroup", 4);
-	fSize = GetEntPropFloat(iEntity, Prop_Send, "m_flModelScale");
 	GetEntityRenderColor(iEntity, iRed, iGreen, iBlue, iAlpha);
-	EntityRenderFx = GetEntityRenderFx(iEntity);
-	iSkin = GetEntProp(iEntity, Prop_Send, "m_nSkin");
 	GetEntPropString(iEntity, Prop_Data, "m_iName", szName, sizeof(szName));
-
+	
 	int iNewEntity = CreateEntityByName(szClass);
 	if (iNewEntity > MaxClients && IsValidEntity(iNewEntity))
 	{
@@ -516,18 +521,21 @@ int Duplicator(int iEntity)
 			PrecacheModel(szModel);
 		}
 
-		DispatchKeyValue(iNewEntity, "model", szModel);
+		SetEntityModel(iNewEntity, szModel);
 		TeleportEntity(iNewEntity, fOrigin, fAngles, NULL_VECTOR);
 		DispatchSpawn(iNewEntity);
-		SetEntData(iNewEntity, FindSendPropInfo("CBaseEntity", "m_CollisionGroup"), iCollision, 4, true);
-		SetEntPropFloat(iNewEntity, Prop_Send, "m_flModelScale", fSize);
-		if(iAlpha < 255)	SetEntityRenderMode(iNewEntity, RENDER_TRANSCOLOR);
-		else				SetEntityRenderMode(iNewEntity, RENDER_NORMAL);
+		SetEntData(iNewEntity, FindSendPropInfo("CBaseEntity", "m_CollisionGroup"), GetEntProp(iEntity, Prop_Data, "m_CollisionGroup", 4), 4, true);
+		SetEntPropFloat(iNewEntity, Prop_Send, "m_flModelScale", GetEntPropFloat(iEntity, Prop_Send, "m_flModelScale"));
+		(iAlpha < 255) ? SetEntityRenderMode(iNewEntity, RENDER_TRANSCOLOR) : SetEntityRenderMode(iNewEntity, RENDER_NORMAL);
 		SetEntityRenderColor(iNewEntity, iRed, iGreen, iBlue, iAlpha);
-		SetEntityRenderFx(iNewEntity, EntityRenderFx);
-		SetEntProp(iNewEntity, Prop_Send, "m_nSkin", iSkin);
+		SetEntityRenderFx(iNewEntity, GetEntityRenderFx(iEntity));
+		SetEntProp(iNewEntity, Prop_Send, "m_nSkin", GetEntProp(iEntity, Prop_Send, "m_nSkin"));
 		SetEntPropString(iNewEntity, Prop_Data, "m_iName", szName);
-
+		
+		GetEntPropVector(iNewEntity, Prop_Send, "m_vecOrigin", fOrigin);
+		
+		PrintCenterTextAll("%f %f %f", fOrigin[0], fOrigin[1], fOrigin[2]);
+		
 		return iNewEntity;
 	}
 	
@@ -784,8 +792,8 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 		}
 		else
 		{
-			DispatchKeyValueVector(iGrabPoint, "origin", fAimpos);
-			//TeleportEntity(iGrabPoint, fAimpos, NULL_VECTOR, NULL_VECTOR);
+			//DispatchKeyValueVector(iGrabPoint, "origin", fAimpos);
+			TeleportEntity(iGrabPoint, fAimpos, NULL_VECTOR, NULL_VECTOR);
 			
 			int clientvm = EntRefToEntIndex(g_iClientVMRef[client]);
 			if (clientvm != INVALID_ENT_REFERENCE)
@@ -833,7 +841,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 			g_iGrabEntityRef[client] = g_iAimingEntityRef[client];
 			iEntity = EntRefToEntIndex(g_iGrabEntityRef[client]);
 			
-			DispatchKeyValueVector(iGrabPoint, "origin", fAimpos);
+			//DispatchKeyValueVector(iGrabPoint, "origin", fAimpos);
 			if (g_bPhysGunMode[client])
 			{
 				DispatchKeyValueVector(iGrabPoint, "angles", GetAngleYOnly(angles));
@@ -844,6 +852,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 				GetEntPropVector(iEntity, Prop_Send, "m_angRotation", fAngle);
 				DispatchKeyValueVector(iGrabPoint, "angles", fAngle);
 			}
+			
 			TeleportEntity(iGrabPoint, fAimpos, NULL_VECTOR, NULL_VECTOR);
 			
 			char szClass[32];
@@ -990,7 +999,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 					int owner = Build_ReturnEntityOwner(iEntity);
 					if (owner > 0 && owner <= MaxClients)
 					{
-						ShowHudText(client, -1, "MODE: %s\n\nObject: %s\nName: %s\nOwner: %N", strMode, strClassname, GetEntityName(iEntity), Build_ReturnEntityOwner(iEntity));
+						ShowHudText(client, -1, "MODE: %s\n\nObject: %s\nName: %s\nOwner: %N", strMode, strClassname, GetEntityName(iEntity), owner);
 					}
 					else
 					{
