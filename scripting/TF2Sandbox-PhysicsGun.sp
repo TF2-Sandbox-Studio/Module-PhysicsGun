@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "4.6"
+#define PLUGIN_VERSION "4.7"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -184,6 +184,7 @@ public Action Command_EquipPhysicsGun(int client, int args)
 		
 		TF2_RemoveWeaponSlot(client, WEAPON_SLOT);
 		DispatchSpawn(weapon);
+		
 		EquipPlayerWeapon(client, weapon);		
 	}
 
@@ -532,10 +533,6 @@ int Duplicator(int iEntity)
 		SetEntProp(iNewEntity, Prop_Send, "m_nSkin", GetEntProp(iEntity, Prop_Send, "m_nSkin"));
 		SetEntPropString(iNewEntity, Prop_Data, "m_iName", szName);
 		
-		GetEntPropVector(iNewEntity, Prop_Send, "m_vecOrigin", fOrigin);
-		
-		PrintCenterTextAll("%f %f %f", fOrigin[0], fOrigin[1], fOrigin[2]);
-		
 		return iNewEntity;
 	}
 	
@@ -576,11 +573,11 @@ stock void ClientSettings(int client, int &buttons, int &impulse, float vel[3], 
 			//Fix client eyes angles
 			if (buttons & IN_RELOAD || buttons & IN_ATTACK3)
 			{
-				if(!(GetEntityFlags(client) & FL_FROZEN))	SetEntityFlags(client, (GetEntityFlags(client) | FL_FROZEN));
+				if(!(GetEntityFlags(client) & FL_FROZEN)) SetEntityFlags(client, (GetEntityFlags(client) | FL_FROZEN));
 			}
 			else
 			{
-				if(GetEntityFlags(client) & FL_FROZEN)	SetEntityFlags(client, (GetEntityFlags(client) & ~FL_FROZEN));
+				if(GetEntityFlags(client) & FL_FROZEN) SetEntityFlags(client, (GetEntityFlags(client) & ~FL_FROZEN));
 			}
 		}
 		else
@@ -596,9 +593,9 @@ stock void ClientSettings(int client, int &buttons, int &impulse, float vel[3], 
 	{
 		SDKUnhook(client, SDKHook_WeaponCanSwitchTo, BlockWeaponSwitch);
 		
-		if(GetEntProp(client, Prop_Send, "m_iHideHUD") & HIDEHUD_WEAPONSELECTION)	SetEntProp(client, Prop_Send, "m_iHideHUD", GetEntProp(client, Prop_Send, "m_iHideHUD") &~HIDEHUD_WEAPONSELECTION);
+		if(GetEntProp(client, Prop_Send, "m_iHideHUD") & HIDEHUD_WEAPONSELECTION) SetEntProp(client, Prop_Send, "m_iHideHUD", GetEntProp(client, Prop_Send, "m_iHideHUD") &~HIDEHUD_WEAPONSELECTION);
 		
-		if(GetEntityFlags(client) & FL_FROZEN)	SetEntityFlags(client, (GetEntityFlags(client) & ~FL_FROZEN));
+		if(GetEntityFlags(client) & FL_FROZEN) SetEntityFlags(client, (GetEntityFlags(client) & ~FL_FROZEN));
 	}
 }
 
