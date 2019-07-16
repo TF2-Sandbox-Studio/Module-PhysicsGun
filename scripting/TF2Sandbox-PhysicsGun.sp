@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "4.7"
+#define PLUGIN_VERSION "4.8"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -41,6 +41,17 @@ static const int g_iPhysicsGunQuality = 1;
 static const int g_iPhysicsGunLevel = 99-128;	//Level displays as 99 but negative level ensures this is unique
 static const int g_iPhysicsGunColor[4] = {0, 191, 255, 255};
 
+enum PhysicsGunSequence
+{
+	IDLE = 0,
+	HOLD_IDLE,
+	DRAW,
+	HOLSTER,
+	FIRE,
+	ALTFIRE,
+	CHARGEUP
+}
+
 ConVar g_cvbCanGrabBuild;
 
 int g_iModelIndex;
@@ -49,6 +60,7 @@ int g_iPhysicsGunVM;
 int g_iPhysicsGunWM;
 
 bool g_bPhysGunMode[MAXPLAYERS + 1];
+bool g_bIN_ATTACK[MAXPLAYERS + 1];
 bool g_bIN_ATTACK2[MAXPLAYERS + 1];
 
 int g_iAimingEntityRef[MAXPLAYERS + 1]; //Aimming entity ref
@@ -67,6 +79,8 @@ float g_fCopyCD[MAXPLAYERS + 1];
 
 public void OnPluginStart()
 {
+	CreateConVar("sm_tf2sb_physgun_version", PLUGIN_VERSION, "", FCVAR_SPONLY|FCVAR_NOTIFY);
+	
 	RegAdminCmd("sm_physgun", Command_EquipPhysicsGun, 0, "Equip a Physics Gun");
 	RegAdminCmd("sm_physicsgun", Command_EquipPhysicsGun, 0, "Equip a Physics Gun");
 	
@@ -539,7 +553,7 @@ int Duplicator(int iEntity)
 	return -1;
 }
 
-stock void ClientSettings(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
+void ClientSettings(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
 {
 	int iViewModel = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
 	if(IsHoldingPhysicsGun(client) && EntRefToEntIndex(g_iClientVMRef[client]) == INVALID_ENT_REFERENCE)
@@ -549,11 +563,50 @@ stock void ClientSettings(int client, int &buttons, int &impulse, float vel[3], 
 		 
 		//Create client physics gun viewmodel
 		g_iClientVMRef[client] = EntIndexToEntRef(CreateVM(client, g_iPhysicsGunVM));
+		
+		int iTFViewModel = EntRefToEntIndex(g_iClientVMRef[client]);
+		if (IsValidEntity(iTFViewModel))
+		{
+			SetEntProp(iTFViewModel, Prop_Send, "m_nSequence", view_as<PhysicsGunSequence>(DRAW));
+			SetEntPropFloat(iTFViewModel, Prop_Send, "m_flPlaybackRate", 3.0);
+		}
 	}
 	//Remove client physics gun viewmodel
 	else if (!IsHoldingPhysicsGun(client) && EntRefToEntIndex(g_iClientVMRef[client]) != INVALID_ENT_REFERENCE)
 	{
 		AcceptEntityInput(EntRefToEntIndex(g_iClientVMRef[client]), "Kill");
+	}
+	
+	if (IsHoldingPhysicsGun(client))
+	{
+		int iTFViewModel = EntRefToEntIndex(g_iClientVMRef[client]);
+		
+		if (buttons & IN_ATTACK)
+		{
+			if (IsValidEntity(iTFViewModel))
+			{
+				if (!g_bIN_ATTACK[client])
+				{
+					g_bIN_ATTACK[client] = true;
+					
+					SetEntProp(iTFViewModel, Prop_Send, "m_nSequence", view_as<PhysicsGunSequence>(FIRE));
+					SetEntPropFloat(iTFViewModel, Prop_Send, "m_flPlaybackRate", 1.5);
+				}
+			}
+		}
+		else
+		{
+			if (IsValidEntity(iTFViewModel))
+			{
+				if (g_bIN_ATTACK[client])
+				{
+					SetEntProp(iTFViewModel, Prop_Send, "m_nSequence", view_as<PhysicsGunSequence>(IDLE));
+					SetEntPropFloat(iTFViewModel, Prop_Send, "m_flPlaybackRate", 0.0);
+				}
+			}
+			
+			g_bIN_ATTACK[client] = false;
+		}
 	}
 	
 	if (IsHoldingPhysicsGun(client) && buttons & IN_ATTACK)
@@ -564,12 +617,6 @@ stock void ClientSettings(int client, int &buttons, int &impulse, float vel[3], 
 			SDKHook(client, SDKHook_WeaponCanSwitchTo, BlockWeaponSwitch);
 			SetEntProp(client, Prop_Send, "m_iHideHUD", GetEntProp(client, Prop_Send, "m_iHideHUD") | HIDEHUD_WEAPONSELECTION);
 			
-			int iTFViewModel = EntRefToEntIndex(g_iClientVMRef[client]);
-			if (IsValidEntity(iTFViewModel) && GetEntProp(iTFViewModel, Prop_Send, "m_nSequence") != 1)
-			{
-				SetEntProp(iTFViewModel, Prop_Send, "m_nSequence", 1);
-			}
-			
 			//Fix client eyes angles
 			if (buttons & IN_RELOAD || buttons & IN_ATTACK3)
 			{
@@ -578,14 +625,6 @@ stock void ClientSettings(int client, int &buttons, int &impulse, float vel[3], 
 			else
 			{
 				if(GetEntityFlags(client) & FL_FROZEN) SetEntityFlags(client, (GetEntityFlags(client) & ~FL_FROZEN));
-			}
-		}
-		else
-		{
-			int iTFViewModel = EntRefToEntIndex(g_iClientVMRef[client]);
-			if (IsValidEntity(iTFViewModel) && GetEntProp(iTFViewModel, Prop_Send, "m_nSequence") != 0)
-			{
-				SetEntProp(iTFViewModel, Prop_Send, "m_nSequence", 0);
 			}
 		}
 	}
@@ -1032,10 +1071,10 @@ char[] GetEntityName(int entity)
 
 void AnglesNormalize(float vAngles[3])
 {
-	while (vAngles[0] > 89.0)vAngles[0] -= 360.0;
-	while (vAngles[0] < -89.0)vAngles[0] += 360.0;
-	while (vAngles[1] > 180.0)vAngles[1] -= 360.0;
-	while (vAngles[1] < -180.0)vAngles[1] += 360.0;
-	while (vAngles[2] < -0.0)vAngles[2] += 360.0;
-	while (vAngles[2] >= 360.0)vAngles[2] -= 360.0;
+	while (vAngles[0] > 89.0) vAngles[0] -= 360.0;
+	while (vAngles[0] < -89.0) vAngles[0] += 360.0;
+	while (vAngles[1] > 180.0) vAngles[1] -= 360.0;
+	while (vAngles[1] < -180.0) vAngles[1] += 360.0;
+	while (vAngles[2] < -0.0) vAngles[2] += 360.0;
+	while (vAngles[2] >= 360.0) vAngles[2] -= 360.0;
 }
