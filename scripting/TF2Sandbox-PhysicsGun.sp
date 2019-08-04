@@ -505,7 +505,7 @@ int Duplicator(int iEntity)
 {
 	//Get Value
 	float fOrigin[3], fAngles[3];
-	char szModel[64], szName[128], szClass[32];
+	char szModel[128], szName[128], szClass[32];
 	int iRed, iGreen, iBlue, iAlpha;
 	
 	GetEntityClassname(iEntity, szClass, sizeof(szClass));
