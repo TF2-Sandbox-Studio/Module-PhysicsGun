@@ -11,4 +11,4 @@ Command: `sm_physgun`
 | player            |               |
 | tf_dropped_weapon | ✓             |
 
-![Screenshot](https://github.com/tf2-sandbox-studio/Module-PhysicsGun/raw/master/screenshot.png)
+![Screenshot](https://github.com/tf2-sandbox-studio/Module-PhysicsGun/raw/master/2019-08-20-min.png)
