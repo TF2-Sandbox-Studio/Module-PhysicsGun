@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "5.0"
+#define PLUGIN_VERSION "5.1"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -61,6 +61,7 @@ enum PhysicsGunSequence
 Handle g_hSyncHints;
 
 ConVar g_cvbCanGrabBuild;
+ConVar g_cvbFullDuplicate;
 
 int g_iModelIndex;
 int g_iHaloIndex;
@@ -95,6 +96,7 @@ public void OnPluginStart()
 	RegAdminCmd("sm_physicsgun", Command_EquipPhysicsGun, 0, "Equip a Physics Gun");
 	
 	g_cvbCanGrabBuild = CreateConVar("sm_tf2sb_physgun_cangrabbuild", "0", "Enable/disable grabbing buildings", 0, true, 0.0, true, 1.0);
+	g_cvbFullDuplicate = CreateConVar("sm_tf2sb_physgun_fullduplicate", "0", "Enable/disable full duplicate feature - Disable = Only prop_dynamic", 0, true, 0.0, true, 1.0);
 	
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	
@@ -142,20 +144,37 @@ public void OnClientPutInServer(int client)
 
 public void OnClientDisconnect(int client)
 {
+	//Kill Grab Point
 	int iGrabPoint = EntRefToEntIndex(g_iGrabPointRef[client]);
 	if (iGrabPoint != INVALID_ENT_REFERENCE && iGrabPoint != 0)
 	{
 		AcceptEntityInput(iGrabPoint, "Kill");
 	}
+	
+	//Kill Grab Outline
+	int iGrabOutline = EntRefToEntIndex(g_iGrabOutlineRef[client]);
+	if (iGrabOutline != INVALID_ENT_REFERENCE && iGrabOutline != 0)
+	{
+		AcceptEntityInput(iGrabOutline, "Kill");
+	}
+	
+	//Kill Grab Glow
+	int iGrabGlow = EntRefToEntIndex(g_iGrabGlowRef[client]);
+	if (iGrabGlow != INVALID_ENT_REFERENCE && iGrabGlow != 0)
+	{
+		AcceptEntityInput(iGrabGlow, "Kill");
+	}
 }
 
+//Block sound when client IN_ATTACK
+#define SOUND_BLOCK "common/wpn_denyselect.wav"
 public Action SoundHook(int clients[64], int& numClients, char sample[PLATFORM_MAX_PATH], int& entity, int& channel, float& volume, int& level, int& pitch, int& flags, char soundEntry[PLATFORM_MAX_PATH], int& seed)
 {
 	for (int i = 1; i <= MaxClients; i++)
 	{
 		if (IsClientInGame(i) && IsPlayerAlive(i) && IsHoldingPhysicsGun(i))
 		{
-			if (StrEqual(sample, "common/wpn_denyselect.wav"))
+			if (StrEqual(sample, SOUND_BLOCK))
 			{
 				return Plugin_Stop;
 			}
@@ -188,17 +207,8 @@ public Action Command_EquipPhysicsGun(int client, int args)
 		return Plugin_Continue;
 	}
 	
-	Build_PrintToChat(client, "You have equipped a Physics Gun (Sandbox version)!");
-	
-	//Set physics gun as Active Weapon
-	int weapon = GetPlayerWeaponSlot(client, WEAPON_SLOT);
-	if (IsValidEntity(weapon))
-	{
-		SetEntPropEnt(client, Prop_Send, "m_hActiveWeapon", weapon);
-	}
-	
 	//Credits: FlaminSarge
-	weapon = CreateEntityByName("tf_weapon_builder");
+	int weapon = CreateEntityByName("tf_weapon_builder");
 	if (IsValidEntity(weapon))
 	{
 		SetEntityModel(weapon, MODEL_PHYSICSGUNWM);
@@ -223,7 +233,12 @@ public Action Command_EquipPhysicsGun(int client, int args)
 		TF2_RemoveWeaponSlot(client, WEAPON_SLOT);
 		DispatchSpawn(weapon);
 		
-		EquipPlayerWeapon(client, weapon);		
+		EquipPlayerWeapon(client, weapon);
+		
+		//Set physics gun as Active Weapon
+		SetEntPropEnt(client, Prop_Send, "m_hActiveWeapon", weapon);
+		
+		Build_PrintToChat(client, "You have equipped a Physics Gun (Sandbox version)!");
 	}
 
 	return Plugin_Continue;
@@ -441,52 +456,30 @@ int TF2_EquipWearable(int client, int entity)
 	if (g_hSdkEquipWearable != INVALID_HANDLE) SDKCall(g_hSdkEquipWearable, client, entity);
 }
 
-bool HasOutline(int iEnt)
+int CreateOutline(int entity)
 {
-	int index = -1;
-	while ((index = FindEntityByClassname(index, "tf_glow")) != -1)
+	int ent = CreateEntityByName("tf_glow");
+	if(IsValidEntity(ent))
 	{
-		if (GetEntPropEnt(index, Prop_Send, "m_hTarget") == iEnt)
-		{
-			return true;
-		}
-	}
-	
-	return false;
-}
+		char oldEntName[256];
+		GetEntPropString(entity, Prop_Data, "m_iName", oldEntName, sizeof(oldEntName));
+		
+		char strName[128], strClass[64];
+		GetEntityClassname(entity, strClass, sizeof(strClass));
+		Format(strName, sizeof(strName), "%s%i", strClass, EntIndexToEntRef(entity));
+		DispatchKeyValue(entity, "targetname", strName);
+		DispatchKeyValue(ent, "target", strName);
+		
+		DispatchKeyValue(ent, "Mode", "0");
+		DispatchKeyValue(ent, "GlowColor", "135 224 230 255"); 
+		
+		DispatchSpawn(ent);
 
-int CreateOutline(int iEnt)
-{
-	if(!HasOutline(iEnt))
-	{
-		char oldEntName[64];
-		GetEntPropString(iEnt, Prop_Data, "m_iName", oldEntName, sizeof(oldEntName));
+		AcceptEntityInput(ent, "Enable");
 		
-		char strName[126], strClass[64];
-		GetEntityClassname(iEnt, strClass, sizeof(strClass));
-		Format(strName, sizeof(strName), "%s%i", strClass, iEnt);
-		DispatchKeyValue(iEnt, "targetname", strName);
+		SetEntPropString(entity, Prop_Data, "m_iName", oldEntName);
 		
-		int ent = CreateEntityByName("tf_glow");
-		if(IsValidEntity(ent))
-		{
-			DispatchKeyValue(ent, "targetname", "GrabOutline");
-			DispatchKeyValue(ent, "target", strName);
-			DispatchKeyValue(ent, "Mode", "0");
-			
-			char strColor[18];
-			Format(strColor, sizeof(strColor), "%i %i %i %i", 135, 224, 230, 255);
-			DispatchKeyValue(ent, "GlowColor", strColor); 
-			
-			DispatchSpawn(ent);
-	
-			AcceptEntityInput(ent, "Enable");
-			
-			//Change name back to old name because we don't need it anymore.
-			SetEntPropString(iEnt, Prop_Data, "m_iName", oldEntName);
-			
-			return ent;
-		}
+		return ent;
 	}
 	
 	return -1;
@@ -542,6 +535,11 @@ int Duplicator(int iEntity)
 	else if (StrEqual(szClass, "prop_physics"))
 	{
 		szClass = "prop_physics_override";
+	}
+	
+	if (!g_cvbFullDuplicate.BoolValue)
+	{
+		szClass = "prop_dynamic_override";
 	}
 	
 	GetEntPropString(iEntity, Prop_Data, "m_ModelName", szModel, sizeof(szModel));
