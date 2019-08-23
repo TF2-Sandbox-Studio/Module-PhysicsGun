@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "5.1"
+#define PLUGIN_VERSION "5.2"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -26,6 +26,8 @@ public const float ZERO_VECTOR[3] = {0.0, 0.0, 0.0};
 
 //Hide ammo count & weapon selection
 #define HIDEHUD_WEAPONSELECTION	( 1<<0 )
+
+#define EF_NODRAW (1 << 5)
 
 //Impluse
 #define IN_SPRAY 201
@@ -126,6 +128,7 @@ public void OnMapStart()
 
 public void OnClientPutInServer(int client)
 {
+	g_bPhysGunMode[client] = false;
 	g_bShowHints[client] = true;
 	
 	g_iAimingEntityRef[client] = INVALID_ENT_REFERENCE;
@@ -256,6 +259,20 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
 public Action BlockWeaponSwitch(int client, int entity)
 {
 	return Plugin_Handled;
+}
+
+public void TF2_OnConditionRemoved(int client, TFCond condition)
+{
+	if (condition == TFCond_Taunting)
+	{
+		if (IsHoldingPhysicsGun(client))
+		{
+			int iViewModel = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
+			
+			//Hide Original viewmodel
+			SetEntProp(iViewModel, Prop_Send, "m_fEffects", GetEntProp(iViewModel, Prop_Send, "m_fEffects") | EF_NODRAW);
+		}
+	}
 }
 
 public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
@@ -409,7 +426,6 @@ void TE_SetupBeamEnts(int ent1, int ent2, int ModelIndex, int HaloIndex, int Sta
 
 //Credits: FlaminSarge
 #define EF_BONEMERGE			(1 << 0)
-#define EF_NODRAW 				(1 << 5)
 #define EF_BONEMERGE_FASTCULL	(1 << 7)
 int CreateVM(int client, int modelindex)
 {
