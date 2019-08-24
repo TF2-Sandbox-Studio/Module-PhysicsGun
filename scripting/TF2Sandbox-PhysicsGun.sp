@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "5.2"
+#define PLUGIN_VERSION "5.3"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -86,6 +86,8 @@ float g_fGrabDistance[MAXPLAYERS + 1]; //Distance between the client eye and ent
 
 float g_oldfEntityPos[MAXPLAYERS + 1][3];
 float g_fEntityPos[MAXPLAYERS + 1][3];
+
+MoveType g_mtOriginal[MAXPLAYERS + 1];
 
 float g_fRotateCD[MAXPLAYERS + 1];
 float g_fCopyCD[MAXPLAYERS + 1];
@@ -253,6 +255,7 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
 	if(client > 0 && client <= MaxClients && IsClientInGame(client))
 	{
 		TF2_RegeneratePlayer(client);
+		g_mtOriginal[client] = GetEntityMoveType(client);
 	}
 }
 
@@ -338,7 +341,7 @@ float[] GetPointAimPosition(float pos[3], float angles[3], float maxtracedistanc
 	if(TR_DidHit(trace))
 	{
 		int entity = TR_GetEntityIndex(trace);
-		if (entity > MaxClients && (Build_ReturnEntityOwner(entity) == client || CheckCommandAccess(client, "sm_admin", ADMFLAG_GENERIC)))
+		if ((Build_ReturnEntityOwner(entity) == client || CheckCommandAccess(client, "sm_admin", ADMFLAG_GENERIC)))
 		{
 			g_iAimingEntityRef[client] = EntIndexToEntRef(entity);
 			
@@ -377,8 +380,7 @@ public bool TraceEntityFilter(int entity, int mask, int client)
 	return (IsValidEntity(entity)
 			&& entity != client
 			&& entity != EntRefToEntIndex(g_iGrabEntityRef[client])
-			&& entity != EntRefToEntIndex(g_iGrabPointRef[client])
-			&& MaxClients < entity);
+			&& entity != EntRefToEntIndex(g_iGrabPointRef[client]));
 }
 
 float[] GetAngleYOnly(const float angles[3])
@@ -754,9 +756,15 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 			//Set entity velocity to 0
 			char szClass[32];
 			GetEdictClassname(iEntity, szClass, sizeof(szClass));
-			if(StrEqual(szClass, "prop_physics") || StrEqual(szClass, "tf_dropped_weapon"))
+			if(StrEqual(szClass, "prop_physics") || StrEqual(szClass, "tf_dropped_weapon") || (iEntity > 0 && iEntity <= MaxClients))
 			{
 				TeleportEntity(iEntity, NULL_VECTOR, NULL_VECTOR, ZERO_VECTOR);
+
+				if(iEntity > 0 && iEntity <= MaxClients && IsClientInGame(iEntity) && IsPlayerAlive(iEntity))
+				{
+					g_mtOriginal[iEntity] = GetEntityMoveType(iEntity);
+					SetEntityMoveType(iEntity, MOVETYPE_NONE);
+				}
 			}
 			
 			//Set entity Outline
@@ -1066,8 +1074,13 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 			//Apply velocity
 			char szClass[32];
 			GetEdictClassname(entity, szClass, sizeof(szClass));
-			if(StrEqual(szClass, "prop_physics") || StrEqual(szClass, "tf_dropped_weapon"))
+			if(StrEqual(szClass, "prop_physics") || StrEqual(szClass, "tf_dropped_weapon") || (entity > 0 && entity <= MaxClients))
 			{
+				if(entity > 0 && entity <= MaxClients && IsClientInGame(entity) && IsPlayerAlive(entity))
+				{
+					SetEntityMoveType(entity, g_mtOriginal[entity]);
+				}
+
 				float vector[3];
 				MakeVectorFromPoints(g_oldfEntityPos[client], g_fEntityPos[client], vector);
 				
