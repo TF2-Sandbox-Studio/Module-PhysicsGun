@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "5.3"
+#define PLUGIN_VERSION "5.4"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -341,7 +341,7 @@ float[] GetPointAimPosition(float pos[3], float angles[3], float maxtracedistanc
 	if(TR_DidHit(trace))
 	{
 		int entity = TR_GetEntityIndex(trace);
-		if ((Build_ReturnEntityOwner(entity) == client || CheckCommandAccess(client, "sm_admin", ADMFLAG_GENERIC)))
+		if (entity > 0 && (Build_ReturnEntityOwner(entity) == client || CheckCommandAccess(client, "sm_admin", ADMFLAG_GENERIC)))
 		{
 			g_iAimingEntityRef[client] = EntIndexToEntRef(entity);
 			
