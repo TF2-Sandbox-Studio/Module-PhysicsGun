@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "5.4"
+#define PLUGIN_VERSION "5.41"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -41,13 +41,17 @@ public const float ZERO_VECTOR[3] = {0.0, 0.0, 0.0};
 
 #define MODEL_PHYSICSLASER "materials/sprites/physbeam.vmt"
 #define MODEL_HALOINDEX	"materials/sprites/halo01.vmt"
-#define MODEL_PHYSICSGUNVM "models/weapons/v_superphyscannon.mdl"
+char g_strPhysGunVM[2][] =
+{
+	"models/weapons/v_physcannon.mdl",
+	"models/weapons/v_superphyscannon.mdl"
+};
 #define MODEL_PHYSICSGUNWM "models/weapons/w_physics.mdl" //"models/weapons/w_superphyscannon.mdl" <- broken world model
 
 static const int g_iPhysicsGunWeaponIndex = 423;//Choose Saxxy(423) because the player movement won't become a villager
 static const int g_iPhysicsGunQuality = 1;
 static const int g_iPhysicsGunLevel = 99-128;	//Level displays as 99 but negative level ensures this is unique
-static const int g_iPhysicsGunColor[4] = {0, 191, 255, 255};
+int g_iPhysicsGunColor[2][4] = { {255, 50, 0, 255}, {0, 191, 255, 255} };
 
 enum PhysicsGunSequence
 {
@@ -67,7 +71,7 @@ ConVar g_cvbFullDuplicate;
 
 int g_iModelIndex;
 int g_iHaloIndex;
-int g_iPhysicsGunVM;
+int g_iPhysicsGunVM[2];
 int g_iPhysicsGunWM;
 
 bool g_bPhysGunMode[MAXPLAYERS + 1];
@@ -99,6 +103,8 @@ public void OnPluginStart()
 	RegAdminCmd("sm_physgun", Command_EquipPhysicsGun, 0, "Equip a Physics Gun");
 	RegAdminCmd("sm_physicsgun", Command_EquipPhysicsGun, 0, "Equip a Physics Gun");
 	
+	RegAdminCmd("sm_physguncredits", Command_PhysicsGunCredits, 0, "Open physgun credits menu");
+	
 	g_cvbCanGrabBuild = CreateConVar("sm_tf2sb_physgun_cangrabbuild", "0", "Enable/disable grabbing buildings", 0, true, 0.0, true, 1.0);
 	g_cvbFullDuplicate = CreateConVar("sm_tf2sb_physgun_fullduplicate", "0", "Enable/disable full duplicate feature - Disable = Only prop_dynamic", 0, true, 0.0, true, 1.0);
 	
@@ -113,7 +119,8 @@ public void OnMapStart()
 {
 	g_iModelIndex = PrecacheModel(MODEL_PHYSICSLASER);
 	g_iHaloIndex = PrecacheModel(MODEL_HALOINDEX);
-	g_iPhysicsGunVM = PrecacheModel(MODEL_PHYSICSGUNVM);
+	g_iPhysicsGunVM[0] = PrecacheModel(g_strPhysGunVM[0]);
+	g_iPhysicsGunVM[1] = PrecacheModel(g_strPhysGunVM[1]);
 	g_iPhysicsGunWM = PrecacheModel(MODEL_PHYSICSGUNWM);
 
 	PrecacheSound(SOUND_MODE);
@@ -216,6 +223,12 @@ public Action Command_EquipPhysicsGun(int client, int args)
 	int weapon = CreateEntityByName("tf_weapon_builder");
 	if (IsValidEntity(weapon))
 	{
+		int iTFViewModel = EntRefToEntIndex(g_iClientVMRef[client]);
+		if (IsValidEntity(iTFViewModel))
+		{
+			AcceptEntityInput(iTFViewModel, "Kill");
+		}
+		
 		SetEntityModel(weapon, MODEL_PHYSICSGUNWM);
 		SetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex", g_iPhysicsGunWeaponIndex);
 		SetEntProp(weapon, Prop_Send, "m_bInitialized", 1);
@@ -247,6 +260,55 @@ public Action Command_EquipPhysicsGun(int client, int args)
 	}
 
 	return Plugin_Continue;
+}
+
+public Action Command_PhysicsGunCredits(int client, int args)
+{
+	char menuinfo[1024];
+	Menu menu = new Menu(Handler_PhysicsGunCredits);
+	
+	Format(menuinfo, sizeof(menuinfo), "TF2 Physics Gun - Credits\n \nDeveloper: BattlefieldDuck, LeadKiller\n \nEaster EGG:");
+	menu.SetTitle(menuinfo);
+	
+	Format(menuinfo, sizeof(menuinfo), "Orange Physgun");
+	menu.AddItem("ORANGE", menuinfo);
+	
+	menu.ExitBackButton = false;
+	menu.ExitButton = false;
+	menu.Display(client, MENU_TIME_FOREVER);
+}
+
+public int Handler_PhysicsGunCredits(Menu menu, MenuAction action, int client, int selection)
+{
+	if (action == MenuAction_Select)
+	{
+		char info[32];
+		menu.GetItem(selection, info, sizeof(info));
+		
+		if (StrEqual(info, "ORANGE"))
+		{
+			Command_EquipPhysicsGun(client, -1);
+			
+			int weapon = GetPlayerWeaponSlot(client, WEAPON_SLOT);
+			if (IsValidEntity(weapon))
+			{
+				SetEntProp(weapon, Prop_Send, "m_nSkin", 0);
+			}
+		}
+		
+		Command_PhysicsGunCredits(client, -1);
+	}
+	else if (action == MenuAction_Cancel)
+	{
+		if (selection == MenuCancel_ExitBack)
+		{
+			
+		}
+	}
+	else if (action == MenuAction_End)
+	{
+		delete menu;
+	}
 }
 
 public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
@@ -474,7 +536,7 @@ int TF2_EquipWearable(int client, int entity)
 	if (g_hSdkEquipWearable != INVALID_HANDLE) SDKCall(g_hSdkEquipWearable, client, entity);
 }
 
-int CreateOutline(int entity)
+int CreateOutline(int client, int entity)
 {
 	int ent = CreateEntityByName("tf_glow");
 	if(IsValidEntity(ent))
@@ -489,7 +551,15 @@ int CreateOutline(int entity)
 		DispatchKeyValue(ent, "target", strName);
 		
 		DispatchKeyValue(ent, "Mode", "0");
-		DispatchKeyValue(ent, "GlowColor", "135 224 230 255"); 
+		
+		if (GetPhysGunWorldModelSkin(client))
+		{
+			DispatchKeyValue(ent, "GlowColor", "135 224 230 255"); 
+		}
+		else
+		{
+			DispatchKeyValue(ent, "GlowColor", "255 170 0 255"); 
+		}
 		
 		DispatchSpawn(ent);
 
@@ -513,9 +583,10 @@ int CreateGlow(int client)
 		
 		SetVariantString("4");
 		AcceptEntityInput(ent, "brightness");
-
-		char strColor[18];
-		Format(strColor, sizeof(strColor), "%i %i %i %i", g_iPhysicsGunColor[0], g_iPhysicsGunColor[1], g_iPhysicsGunColor[2], g_iPhysicsGunColor[3]);
+		
+		int color = GetPhysGunWorldModelSkin(client);
+		char strColor[32];
+		Format(strColor, sizeof(strColor), "%i %i %i %i", g_iPhysicsGunColor[color][0], g_iPhysicsGunColor[color][1], g_iPhysicsGunColor[color][2], g_iPhysicsGunColor[color][3]);
 		SetVariantString(strColor);
 		AcceptEntityInput(ent, "color");
 
@@ -605,7 +676,7 @@ stock void ClientSettings(int client, int &buttons, int &impulse, float vel[3], 
 		SetEntProp(iViewModel, Prop_Send, "m_fEffects", GetEntProp(iViewModel, Prop_Send, "m_fEffects") | EF_NODRAW);
 		 
 		//Create client physics gun viewmodel
-		g_iClientVMRef[client] = EntIndexToEntRef(CreateVM(client, g_iPhysicsGunVM));
+		g_iClientVMRef[client] = EntIndexToEntRef(CreateVM(client, g_iPhysicsGunVM[GetPhysGunWorldModelSkin(client)]));
 		
 		int iTFViewModel = EntRefToEntIndex(g_iClientVMRef[client]);
 		if (IsValidEntity(iTFViewModel))
@@ -774,7 +845,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 				AcceptEntityInput(iGrabOutline, "Kill");
 			}
 			
-			iGrabOutline = CreateOutline(iEntity);
+			iGrabOutline = CreateOutline(client, iEntity);
 			if (IsValidEntity(iGrabOutline))
 			{
 				g_iGrabOutlineRef[client] = EntIndexToEntRef(iGrabOutline);
@@ -1040,7 +1111,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 				int beamspeed = (iEntity != INVALID_ENT_REFERENCE) ? 20 : 10;
 				
 				//Set up client's beam
-				TE_SetupBeamEnts(iGrabPoint, clientvm, g_iModelIndex, g_iHaloIndex, 0, 10, 0.1, beamwidth, beamwidth, 0, 0.0, g_iPhysicsGunColor, beamspeed, 20);
+				TE_SetupBeamEnts(iGrabPoint, clientvm, g_iModelIndex, g_iHaloIndex, 0, 10, 0.1, beamwidth, beamwidth, 0, 0.0, GetPhysGunColor(client), beamspeed, 20);
 				TE_SendToClient(client);
 				
 				//Set up global beam
@@ -1050,7 +1121,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 					if (client != i && IsClientInGame(i))
 					{
 						int iWeaponWM = GetPlayerWeaponSlot(client, WEAPON_SLOT);
-						TE_SetupBeamEnts(iGrabPoint, IsValidEntity(iWeaponWM) ? iWeaponWM : client, g_iModelIndex, g_iHaloIndex, 0, 10, 0.1, beamwidth, beamwidth, 0, 0.0, g_iPhysicsGunColor, beamspeed, 20);
+						TE_SetupBeamEnts(iGrabPoint, IsValidEntity(iWeaponWM) ? iWeaponWM : client, g_iModelIndex, g_iHaloIndex, 0, 10, 0.1, beamwidth, beamwidth, 0, 0.0, GetPhysGunColor(client), beamspeed, 20);
 						
 						TE_SendToClient(i);
 					}
@@ -1137,7 +1208,8 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 			char strMode[50], strHints[256];
 			strMode = (g_bPhysGunMode[client]) ? "Garry's Mod" : "TF2Sandbox";
 			
-			SetHudTextParams(0.75, 0.45, 0.05, g_iPhysicsGunColor[0], g_iPhysicsGunColor[1], g_iPhysicsGunColor[2], g_iPhysicsGunColor[3], 0, 0.0, 0.0, 0.0);
+			int color = GetPhysGunWorldModelSkin(client);
+			SetHudTextParams(0.75, 0.45, 0.05, g_iPhysicsGunColor[color][0], g_iPhysicsGunColor[color][1], g_iPhysicsGunColor[color][2], g_iPhysicsGunColor[color][3], 0, 0.0, 0.0, 0.0);
 			
 			int iEntity = EntRefToEntIndex(g_iGrabEntityRef[client]);
 			if (iEntity != INVALID_ENT_REFERENCE)
@@ -1207,6 +1279,24 @@ char[] GetEntityName(int entity)
 	return strName;
 }
 
+int GetPhysGunWorldModelSkin(int client)
+{
+	int weapon = GetPlayerWeaponSlot(client, WEAPON_SLOT);
+	return GetEntProp(weapon, Prop_Send, "m_nSkin");
+}
+
+int[] GetPhysGunColor(int client)
+{
+	int color = GetPhysGunWorldModelSkin(client);
+	int acolor[4];
+	acolor[0] = g_iPhysicsGunColor[color][0];
+	acolor[1] = g_iPhysicsGunColor[color][1];
+	acolor[2] = g_iPhysicsGunColor[color][2];
+	acolor[3] = g_iPhysicsGunColor[color][3];
+	
+	return acolor;
+}
+
 void SetAdjustedAngleX(float fAngle[3])
 {
 	AnglesNormalize(fAngle);
@@ -1220,7 +1310,6 @@ void SetAdjustedAngleX(float fAngle[3])
 	else if(0.0 > fAngle[0] && fAngle[0] > -45.0)		fAngle[0] = -45.0;
 	else if(-45.0 > fAngle[0] && fAngle[0] > -90.0)		fAngle[0] = -90.0;
 }
-
 
 void SetAdjustedAngleY(float fAngle[3])
 {
