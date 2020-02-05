@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "BattlefieldDuck"
-#define PLUGIN_VERSION "5.41"
+#define PLUGIN_VERSION "5.5"
 
 #include <sourcemod>
 #include <sdkhooks>
@@ -19,7 +19,7 @@ public Plugin myinfo =
 	author = PLUGIN_AUTHOR,
 	description = "Brings physics gun feature to tf2! (Sandbox version)",
 	version = PLUGIN_VERSION,
-	url = "https://github.com/BattlefieldDuck/TF2_PhysicsGun"
+	url = "https://github.com/TF2-Sandbox-Studio/Module-PhysicsGun"
 };
 
 public const float ZERO_VECTOR[3] = {0.0, 0.0, 0.0};
@@ -736,7 +736,7 @@ stock void ClientSettings(int client, int &buttons, int &impulse, float vel[3], 
 			//Fix client eyes angles
 			int EntityFlags = GetEntityFlags(client);
 			
-			if (buttons & IN_RELOAD || buttons & IN_ATTACK3)
+			if (buttons & IN_RELOAD || buttons & IN_ATTACK2 || buttons & IN_ATTACK3)
 			{
 				if(!(EntityFlags & FL_FROZEN))
 				{
@@ -874,7 +874,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 		{
 			TeleportEntity(iGrabPoint, fAimpos, NULL_VECTOR, NULL_VECTOR);
 			
-			if (buttons & IN_RELOAD || buttons & IN_ATTACK3)
+			if (buttons & IN_RELOAD || buttons & IN_ATTACK2 || buttons & IN_ATTACK3)
 			{
 				//Rotate + Push and pull
 				if (buttons & IN_RELOAD)
@@ -1038,6 +1038,17 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 						}
 					}
 				}
+				//Resize
+				else if (buttons & IN_ATTACK2)
+				{
+					float fSize = GetEntPropFloat(iEntity, Prop_Send, "m_flModelScale");
+					
+					fSize -= mouse[1] / 500.0;
+					
+					fSize = (fSize < 0.1) ? 0.1 : (fSize > 10.0) ? 10.0 : fSize;
+
+					SetEntPropFloat(iEntity, Prop_Send, "m_flModelScale", fSize);
+				}
 				//Push and pull
 				else if (buttons & IN_ATTACK3)
 				{
@@ -1086,7 +1097,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 					
 					//Stick
 					SetVariantString("!activator");
-					AcceptEntityInput(iEntity, "SetParent", iGrabPoint);		
+					AcceptEntityInput(iEntity, "SetParent", iGrabPoint);
 				}
 			}
 		}
@@ -1209,7 +1220,7 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 			strMode = (g_bPhysGunMode[client]) ? "Garry's Mod" : "TF2Sandbox";
 			
 			int color = GetPhysGunWorldModelSkin(client);
-			SetHudTextParams(0.75, 0.45, 0.05, g_iPhysicsGunColor[color][0], g_iPhysicsGunColor[color][1], g_iPhysicsGunColor[color][2], g_iPhysicsGunColor[color][3], 0, 0.0, 0.0, 0.0);
+			SetHudTextParams(0.73, 0.43, 0.1, g_iPhysicsGunColor[color][0], g_iPhysicsGunColor[color][1], g_iPhysicsGunColor[color][2], g_iPhysicsGunColor[color][3], 0, 0.0, 0.0, 0.0);
 			
 			int iEntity = EntRefToEntIndex(g_iGrabEntityRef[client]);
 			if (iEntity != INVALID_ENT_REFERENCE)
@@ -1223,10 +1234,17 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 					
 					ShowSyncHudText(client, g_hSyncHints, "MODE: %s\n\nAngles: %i %i %i%s", strMode, RoundFloat(fPrintAngle[0]), RoundFloat(fPrintAngle[1]), RoundFloat(fPrintAngle[2]), strHints);
 				}
+				else if (buttons & IN_ATTACK2)
+				{
+					ShowSyncHudText(client, g_hSyncHints, "MODE: %s\n\nSize: %.2f", strMode, GetEntPropFloat(iEntity, Prop_Send, "m_flModelScale"));
+				}
 				else
 				{
 					char strClassname[64];
 					GetEntityClassname(iEntity, strClassname, sizeof(strClassname));
+					
+					int r, g, b, a;
+					GetEntityRenderColor(iEntity, r, g, b, a);
 					
 					char strUserName[64];
 					strUserName = "Unknown";
@@ -1239,10 +1257,10 @@ stock void PhysGunSettings(int client, int &buttons, int &impulse, float vel[3],
 					
 					if (g_bShowHints[client])
 					{
-						Format(strHints, sizeof(strHints), "\n\n[MOUSE3] Pull/Push\n[R] Rotate\n[T] Smart Copy");
+						Format(strHints, sizeof(strHints), "\n\n[MOUSE2] Resize\n[MOUSE3] Pull/Push\n[R] Rotate\n[T] Smart Copy");
 					}
 					
-					ShowSyncHudText(client, g_hSyncHints, "MODE: %s\n\nObject: %s\nName: %s\nOwner: %s%s", strMode, strClassname, GetEntityName(iEntity), strUserName, strHints);
+					ShowSyncHudText(client, g_hSyncHints, "MODE: %s\n\nObject: %s\nColor: %i %i %i %i\nName: %s\nOwner: %s%s", strMode, strClassname, r, g, b, a, GetEntityName(iEntity), strUserName, strHints);
 				}
 			}
 			else
